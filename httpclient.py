@@ -24,6 +24,8 @@ import re
 # you may use urllib to encode data appropriately
 import urllib
 
+URL_RE=re.compile("^http://(?P<HOST>[A-Za-z0-9\-\.]+)(?P<PORT>:[0-9]+)?(?P<PATH>.*)$")
+
 def help():
     print "httpclient.py [GET/POST] [URL]\n"
 
@@ -32,21 +34,50 @@ class HTTPResponse(object):
         self.code = code
         self.body = body
 
+    def __str__(self):
+        return "CODE:----------\n  %s\nBODY:----------\n  %s" % (self.code, self.body)
+    
 class HTTPClient(object):
     #def get_host_port(self,url):
 
     def connect(self, host, port):
         # use sockets!
-        return None
+        client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        client.connect((host,port))
+        return client
 
+    def handle_url(self,url):
+        if not url.startswith("http://"):
+            url = "http://" + url
+            
+        re_obj=re.search(URL_RE,url)
+        host=re_obj.group('HOST')
+        port_str=re_obj.group('PORT')
+        path=re_obj.group('PATH')
+
+        if not port_str:
+            port=80
+        else:
+            port=int(port_str[1:])
+            
+        if path=='':
+            path='/'
+
+        return host,port,path
+
+  
+        
     def get_code(self, data):
-        return None
+        code = int((data.split('\r\n\r\n')[0]).split(' ')[1])
+        return code
 
     def get_headers(self,data):
-        return None
+        header = data.split('\r\n\r\n')[0]
+        return header
 
     def get_body(self, data):
-        return None
+        body = data.split('\r\n\r\n')[1]
+        return body
 
     # read everything from the socket
     def recvall(self, sock):
@@ -60,14 +91,55 @@ class HTTPClient(object):
                 done = not part
         return str(buffer)
 
+    
     def GET(self, url, args=None):
-        code = 500
-        body = ""
+
+        host,port,path=self.handle_url(url)
+        try:
+            client=self.connect(host,port)
+        except socket.gaierror as e:
+            return HTTPResponse(404, e)
+        http_req = "GET %s HTTP/1.1\r\n" % path
+        http_req += "Host: %s:%d \r\n" %(host,port)
+        http_req += "Connection: close \r\n"
+        http_req += "Accept:*/* \r\n\r\n"
+        client.sendall(http_req)
+        #print(http_req)
+        response=self.recvall(client)
+
+    
+        code = self.get_code(response)
+        body = self.get_body(response)
         return HTTPResponse(code, body)
 
     def POST(self, url, args=None):
-        code = 500
-        body = ""
+        body=""
+        host,port,path=self.handle_url(url)
+        try:
+            client=self.connect(host,port)
+        except socket.gaierror as e:
+            return HTTPResponse(404, e)
+
+        if args:
+            body = urllib.urlencode(args)
+        http_req = "POST %s HTTP/1.1\r\n" % path
+        http_req += "Host: %s:%d \r\n" %(host,port)
+        http_req += "Connection: close \r\n"
+        http_req += "Content-Type: application/x-www-form-urlencoded \r\n"
+        http_req += "Content-Length: %d \r\n" % len(body)
+        http_req += "Accept:*/* \r\n\r\n"
+        client.sendall(http_req)
+        client.sendall(body)
+        
+        
+        print(http_req)
+        response=self.recvall(client)
+
+        
+        
+        code = self.get_code(response)
+        body = self.get_body(response)
+        
         return HTTPResponse(code, body)
 
     def command(self, url, command="GET", args=None):
